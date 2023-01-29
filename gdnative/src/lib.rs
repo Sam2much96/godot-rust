@@ -51,6 +51,16 @@
 //! * **`serde`**<br>
 //!   Enable for `serde` support of several core types. See also [`Variant`](core_types::Variant).
 //!
+//! * **`inventory`**<br>
+//!   Enables automatic class registration via `inventory`.
+//!
+//!   **Attention:** Automatic registration is unsupported on some platforms, notably WASM. `inventory`
+//!   can still be used for iterative development if such platforms are targeted, in which case the
+//!   run-time diagnostic [`init::diagnostics::missing_manual_registration`] may be helpful.
+//!
+//!   Please refer to [the `rust-ctor` README][ctor-repo] for an up-to-date listing of platforms
+//!   that *do* support automatic registration.
+//!
 //! Bindings generation:
 //!
 //! * **`custom-godot`**<br>
@@ -69,30 +79,40 @@
 //!   Enable if the generated binding source code should be human-readable and split
 //!   into multiple files. This can also help IDEs that struggle with a single huge file.
 //!
+//! * **`ptrcall`**<br>
+//!   Enables the `ptrcall` convention for calling Godot API methods. This increases performance, at the
+//!   cost of forward binary compatibility with the engine. Binaries built with `ptrcall` enabled
+//!   **may exhibit undefined behavior** when loaded by a different version of Godot, even when there are
+//!   no breaking API changes as far as GDScript is concerned. Notably, the addition of new default
+//!   parameters breaks any code using `ptrcall`.
+//!
+//!   Cargo features are additive, and as such, it's only necessary to enable this feature for the final
+//!   `cdylib` crates, whenever desired.
+//!
 //! [thread-safety]: https://docs.godotengine.org/en/stable/tutorials/threads/thread_safe_apis.html
 //! [gdnative-overview]: https://godot-rust.github.io/book/gdnative-overview.html
 //! [custom-godot]: https://godot-rust.github.io/book/advanced-guides/custom-godot.html
+//! [ctor-repo]: https://github.com/mmastrac/rust-ctor
 //!
 //!
 
-// TODO: add logo using #![doc(html_logo_url = "https://<url>")]
+#![doc(html_logo_url = "https://github.com/godot-rust/gdnative/raw/master/assets/godot-ferris.svg")]
 
 // Workaround (rustdoc 1.55):
 // Items, which are #[doc(hidden)] in their original crate and re-exported with a wildcard, lose
 // their hidden status. Re-exporting them manually and hiding the wildcard solves this.
 #[doc(inline)]
-pub use gdnative_core::{core_types, export, init, log, object, profiler};
+pub use gdnative_core::{
+    core_types, derive, export, godot_dbg, godot_error, godot_print, godot_site, init, log, object,
+    profiler,
+};
 
 pub mod globalscope;
 
 // Implementation details (e.g. used by macros).
 // However, do not re-export macros (on crate level), thus no wildcard
 #[doc(hidden)]
-pub use gdnative_core::{libc, sys};
-
-/// Derive macros and macro attributes.
-#[doc(inline)]
-pub use gdnative_derive as derive;
+pub use gdnative_core::{libc, private, sys};
 
 /// Curated re-exports of common items.
 pub mod prelude;

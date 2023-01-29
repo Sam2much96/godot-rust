@@ -25,7 +25,10 @@
     clippy::missing_safety_doc,
     clippy::non_send_fields_in_send_ty
 )]
-#![cfg_attr(feature = "gd-test", allow(clippy::blacklisted_name))]
+#![cfg_attr(
+    any(test, feature = "gd-test"),
+    allow(clippy::excessive_precision, clippy::disallowed_names)
+)]
 
 #[doc(hidden)]
 pub extern crate gdnative_sys as sys;
@@ -36,6 +39,13 @@ pub extern crate libc;
 #[cfg(feature = "gd-test")]
 #[macro_use]
 extern crate approx;
+
+#[doc(inline)]
+pub use gdnative_derive::godot_wrap_method;
+
+/// Derive macros and macro attributes.
+#[doc(inline)]
+pub use gdnative_derive as derive;
 
 // Macros have to be processed before they are used.
 mod macros;

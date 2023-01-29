@@ -7,18 +7,55 @@ extern crate quote;
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use syn::{AttributeArgs, DeriveInput, ItemFn, ItemImpl};
+use quote::ToTokens;
+use syn::{parse::Parser, AttributeArgs, DeriveInput, ItemFn, ItemImpl, ItemType};
 
-mod extend_bounds;
 mod methods;
 mod native_script;
 mod profiled;
+mod syntax;
+mod utils;
 mod varargs;
 mod variant;
 
-/// Collects method signatures of all functions in a `NativeClass` that have the `#[method]` attribute and registers them with Godot.
+/// Collects method signatures of all functions in a `NativeClass` that have the `#[method]`
+/// attribute and registers them with Godot.
 ///
-/// For example, in the following class
+/// The `#[methods]` attribute can be used with both `impl Type` and `impl Trait for Type`
+/// blocks. The semantics change depending on whether a mix-in name is provided for the block.
+///
+/// ## Universal `impl` blocks: `#[methods]`
+///
+/// An `impl` block that doesn't have a `mixin` parameter is universal. Universal `#[methods]`
+/// blocks **must not overlap**. Usually, this means that **only one** `impl` block per struct
+/// may be universal.
+///
+/// When applied to a generic `impl`, the `impl` block must apply to **all** monomorphizations
+/// of the type, i.e. be *universal*.
+///
+/// One applicable universal block must be present for each type one wishes to use as a
+/// `NativeClass`. Universal blocks are always registered automatically.
+///
+/// ## Mix-ins: `#[methods(mixin = "Name")]`
+///
+/// When given a name with the `mixin` argument, a block behaves instead as a mix-in block.
+/// `#[method(mixin = "Name")]` creates an opaque type called `Name` under the current scope,
+/// that can be manually registered to any type the `impl` block covers. This can be done in
+/// a `register_with` callback with `builder.mixin::<MyMixin>()`.
+///
+/// Unlike universal blocks, mix-in blocks have a **many-to-many** relationship with the types
+/// they are registered to. Any number of mix-ins can be applied to any number of compatible
+/// types. This can be useful for reusing generics `impl`s, or organizing code for big interfaces.
+///
+/// Additionally, the attribute accepts the following arguments:
+///
+/// - `#[methods(pub)]`<br>
+/// Mix-in types are private by default. The `pub` argument makes them public instead.
+///
+/// ## Example
+///
+/// ### Universal
+///
 /// ```
 /// use gdnative::prelude::*;
 ///
@@ -36,43 +73,39 @@ mod variant;
 /// }
 ///
 /// ```
-/// Will expand to
+///
+/// ### Mix-in
+///
 /// ```
 /// use gdnative::prelude::*;
+///
+/// #[derive(NativeClass)]
+/// #[inherit(Reference)]
+/// #[register_with(register_foo)]
+/// #[no_constructor]
 /// struct Foo {}
-/// impl NativeClass for Foo {
-///     type Base = gdnative::api::Reference;
-///     type UserData = gdnative::export::user_data::LocalCellData<Self>;
+///
+/// fn register_foo(builder: &ClassBuilder<Foo>) {
+///     builder.mixin::<FooMixin>();
 /// }
-/// impl gdnative::export::StaticallyNamed for Foo {
-///     const CLASS_NAME: &'static str = "Foo";
-/// }
-/// impl gdnative::export::NativeClassMethods for Foo {
-///     fn register(builder: &ClassBuilder<Self>) {
-///         use gdnative::export::*;
-///         builder.method("foo", gdnative::export::godot_wrap_method!(Foo, false, fn foo(&self, #[base] _base: &Reference, bar: i64) -> i64))
-///             .with_rpc_mode(RpcMode::Disabled)
-///             .done_stateless();
-///     }
-/// }
+///
+/// #[methods(mixin = "FooMixin")]
 /// impl Foo {
-///     fn foo(&self, _owner: &Reference, bar: i64) -> i64 {
+///     #[method]
+///     fn foo(&self, #[base] _base: &Reference, bar: i64) -> i64 {
 ///         bar
 ///     }
 /// }
 /// ```
-/// **Important**: Only one `impl` block per struct may be attributed with `#[methods]`.
-///
-/// For more context, please refer to [gdnative::derive::NativeClass](NativeClass).
 #[proc_macro_attribute]
 pub fn methods(meta: TokenStream, input: TokenStream) -> TokenStream {
-    if syn::parse::<syn::parse::Nothing>(meta.clone()).is_err() {
-        let err = syn::Error::new_spanned(
-            TokenStream2::from(meta),
-            "#[methods] does not take parameters.",
-        );
-        return error_with_input(input, err);
-    }
+    let args =
+        match syn::punctuated::Punctuated::<syn::NestedMeta, syn::Token![,]>::parse_terminated
+            .parse(meta)
+        {
+            Ok(args) => args.into_iter().collect::<Vec<_>>(),
+            Err(err) => return error_with_input(input, err),
+        };
 
     let impl_block = match syn::parse::<ItemImpl>(input.clone()) {
         Ok(impl_block) => impl_block,
@@ -85,7 +118,10 @@ pub fn methods(meta: TokenStream, input: TokenStream) -> TokenStream {
         err
     }
 
-    TokenStream::from(methods::derive_methods(impl_block))
+    match methods::derive_methods(args, impl_block) {
+        Ok(ts) => ts.into(),
+        Err(err) => error_with_input(input, err),
+    }
 }
 
 /// Makes a function profiled in Godot's built-in profiler. This macro automatically
@@ -129,7 +165,8 @@ pub fn profiled(meta: TokenStream, input: TokenStream) -> TokenStream {
     }
 }
 
-/// Makes it possible to use a type as a NativeScript.
+/// Makes it possible to use a type as a NativeScript. Automatically registers the type
+/// if the `inventory` feature is enabled on supported platforms.
 ///
 /// ## Type attributes
 ///
@@ -232,12 +269,17 @@ pub fn profiled(meta: TokenStream, input: TokenStream) -> TokenStream {
 ///
 ///   Hides the property from the editor. Does not prevent it from being sent over network or saved in storage.
 ///
+/// - `rpc = "selected_rpc"`
+///
+///   Sets the [Multiplayer API RPC Mode](https://docs.godotengine.org/en/stable/classes/class_multiplayerapi.html?highlight=RPC#enumerations) for the property.
+///   See the `#[method]` documentation below for possible values and their semantics.
+///
 /// ### `#[methods]`
 /// Adds the necessary information to a an `impl` block to register the properties and methods with Godot.
 ///
-/// **Important**: This needs to be added to one and only one `impl` block for a given `NativeClass`.
-///
-/// For additional details about how `#[methods]` expands, please refer to [gdnative::methods](macro@methods)
+/// One and only one universal `impl` block must be available for each `NativeClass`
+/// monomorphization, along with any number of additional mix-ins. See [`methods`](attr.methods.html)
+/// for more information.
 ///
 /// ### `#[method]`
 /// Registers the attributed function signature to be used by Godot.
@@ -246,9 +288,12 @@ pub fn profiled(meta: TokenStream, input: TokenStream) -> TokenStream {
 /// [exporting](https://docs.godotengine.org/en/stable/tutorials/export/exporting_basics.html) in GDScript.
 ///
 /// A valid function signature must have:
-/// - `&self` or `&mut self` as its first parameter
-/// - Optionally, `&T` or `TRef<T>` where T refers to the type declared in `#[inherit(T)]` attribute as it's second parameter;
-///   this is typically called the _base_. The parameter must be attributed with `#[base]`.
+/// - `self`, `&self` or `&mut self` as its first parameter, if applicable.
+/// - Up of one of each of the following special arguments, in any order, denoted by the attributes:
+///     - `#[base]` - A reference to the base/owner object. This may be `&T` or `TRef<T>`m where `T` refers to
+///       the type declared in `#[inherit(T)]` attribute for the `NativeClass` type.
+///     - `#[async_ctx]` - The [async context](gdnative::tasks::Context), for async methods. See the `async` argument
+///       below.
 /// - Any number of required parameters, which must have the type `Variant` or must implement the `FromVariant` trait.
 ///  `FromVariant` is implemented for most common types.
 /// - Any number of optional parameters annotated with `#[opt]`. Same rules as for required parameters apply.
@@ -257,6 +302,10 @@ pub fn profiled(meta: TokenStream, input: TokenStream) -> TokenStream {
 ///   or be a `Variant` type.
 ///
 /// ```ignore
+/// // Associated function
+/// #[method]
+/// fn foo();
+///
 /// // No access to base parameter
 /// #[method]
 /// fn foo(&self);
@@ -268,6 +317,20 @@ pub fn profiled(meta: TokenStream, input: TokenStream) -> TokenStream {
 /// // Access base parameter as TRef<T>
 /// #[method]
 /// fn foo(&self, #[base] base: TRef<Reference>);
+///
+/// // Access only the async context. Both variations are valid.
+/// #[method]
+/// async fn foo(#[async_ctx] ctx: Arc<Context>);
+/// #[method(async)]
+/// fn foo(#[async_ctx] ctx: Arc<Context>) -> impl Future<Output = ()> + 'static;
+///
+/// // Access the base parameter as TRef<T>, and the async context. Both variations are valid.
+/// // Note the absence of `async fn`s here: this is due to a current limitation in Rust's lifetime elision rules.
+/// // See the `async` attribute argument down below for more details.
+/// #[method(async)]
+/// fn foo(&self, #[base] base: TRef<Reference>, #[async_ctx] ctx: Arc<Context>) -> impl Future<Output = ()> + 'static;
+/// #[method(async)]
+/// fn foo(&self, #[async_ctx] ctx: Arc<Context>, #[base] base: TRef<Reference>) -> impl Future<Output = ()> + 'static;
 /// ```
 ///
 /// **Note**: Marking a function with `#[method]` does not have any effect unless inside an `impl` block that has the `#[methods]` attribute.
@@ -305,6 +368,29 @@ pub fn profiled(meta: TokenStream, input: TokenStream) -> TokenStream {
 ///      // Assume self.cell is std::cell::RefCell<Vec<i32>>
 ///      self.cell.borrow()
 ///   }
+///   ```
+///
+/// - `async`
+///
+///   Marks the function as async. This is used for functions that aren't `async` themselves, but return `Future`s instead.
+///   This is especially useful for working around Rust's lifetime elision rules, which put the lifetime of `&self` into the
+///   return value for `async fn`s. The `impl Future` syntax instead allows one to explicitly specify a `'static` lifetime,
+///   as required by the async runtime:
+///
+///   ```ignore
+///   // This will NOT compile: Rust assumes that any futures returned by an `async fn` may only live as long as each of its
+///   // arguments, and there is no way to tell it otherwise. As a result, it will emit some cryptic complaints about lifetime.
+///   #[method]
+///   async fn answer(&self) -> i32 {
+///      42
+///   }
+///
+///   // This, however, compiles, thanks to the explicit `'static` lifetime in the return signature.
+///   #[method(async)]
+///   fn answer(&self) -> impl Future<Output = i32> + 'static {
+///      async { 42 }
+///   }
+///
 ///   ```
 ///
 ///
@@ -435,6 +521,36 @@ pub fn derive_native_class(input: TokenStream) -> TokenStream {
     TokenStream::from(derived)
 }
 
+/// Wires up necessary internals for a concrete monomorphization of a generic `NativeClass`,
+/// represented as a type alias, so it can be registered.
+///
+/// The monomorphized type will be available to Godot under the name of the type alias,
+/// once registered.  Automatically registers the type if the `inventory` feature is enabled on
+/// supported platforms.
+///
+/// For more context, please refer to [gdnative::derive::NativeClass](NativeClass).
+///
+/// ## Type attributes
+///
+/// The behavior of the attribute can be customized using additional attributes on the type
+/// alias. All type attributes are optional.
+///
+/// ### `#[register_with(path::to::function)]`
+///
+/// Use a custom function to register signals, properties or methods, in addition
+/// to the one generated by a universal `#[methods]` block on the generic type.
+/// This can be used to register extra mix-ins that apply to the specific monomorphization.
+#[proc_macro_attribute]
+pub fn monomorphize(meta: TokenStream, input: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(meta as AttributeArgs);
+    let item_type = parse_macro_input!(input as ItemType);
+
+    match native_script::derive_monomorphize(args, item_type) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
 #[proc_macro_derive(ToVariant, attributes(variant))]
 pub fn derive_to_variant(input: TokenStream) -> TokenStream {
     match variant::derive_to_variant(variant::ToVariantTrait::ToVariant, input) {
@@ -473,12 +589,44 @@ pub fn derive_from_variant(input: TokenStream) -> TokenStream {
 ///     #[opt] baz: Option<Ref<Node>>,
 /// }
 /// ```
-#[proc_macro_derive(FromVarargs, attributes(opt))]
+///
+/// ## Field attributes
+///
+/// Attributes can be used to customize behavior of certain fields. All attributes are optional.
+///
+/// ### `#[opt]`
+///
+/// Marks an argument as optional. Required arguments must precede all optional arguments.
+/// Default values are obtained through `Default::default`.
+///
+/// ### `#[skip]`
+///
+/// Instructs the macro to skip a field. Skipped fields do not affect the signature of the
+/// argument list. They may be located anywhere. Values are obtained through `Default::default`.
+#[proc_macro_derive(FromVarargs, attributes(opt, skip))]
 pub fn derive_from_varargs(input: TokenStream) -> TokenStream {
     let derive_input = syn::parse_macro_input!(input as syn::DeriveInput);
     match varargs::derive_from_varargs(derive_input) {
         Ok(stream) => stream.into(),
         Err(err) => err.to_compile_error().into(),
+    }
+}
+
+/// Convenience macro to wrap an object's method into a `Method` implementor
+/// that can be passed to the engine when registering a class.
+#[proc_macro]
+#[deprecated = "The legacy manual export macro is deprecated and will be removed in a future godot-rust version. \
+Either use the `#[methods]` attribute macro, or implement the `Method` trait manually instead."]
+pub fn godot_wrap_method(input: TokenStream) -> TokenStream {
+    match methods::expand_godot_wrap_method(input.into()) {
+        Ok(stream) => stream.into(),
+        Err(xs) => {
+            let mut tokens = TokenStream2::new();
+            for err in xs {
+                tokens.extend(err.to_compile_error());
+            }
+            tokens.into()
+        }
     }
 }
 
@@ -494,5 +642,95 @@ fn automatically_derived() -> proc_macro2::TokenStream {
     quote! {
         #[automatically_derived]
         #[allow(nonstandard_style, unused, clippy::style, clippy::complexity, clippy::perf, clippy::pedantic)]
+    }
+}
+
+/// Returns the (possibly renamed or imported as `gdnative`) identifier of the `gdnative_core` crate.
+fn crate_gdnative_core() -> proc_macro2::TokenStream {
+    let found_crate = proc_macro_crate::crate_name("gdnative-core")
+        .or_else(|_| proc_macro_crate::crate_name("gdnative"))
+        .expect("crate not found");
+
+    match found_crate {
+        proc_macro_crate::FoundCrate::Itself => {
+            // Workaround: `proc-macro-crate` returns `Itself` in doc-tests, and refuses to use unstable env
+            // variables for detection.
+            // See https://github.com/bkchr/proc-macro-crate/issues/11
+            if std::env::var_os("UNSTABLE_RUSTDOC_TEST_PATH").is_some() {
+                quote!(gdnative_core)
+            } else {
+                quote!(crate)
+            }
+        }
+        proc_macro_crate::FoundCrate::Name(name) => {
+            let ident = proc_macro2::Ident::new(&name, proc_macro2::Span::call_site());
+            ident.to_token_stream()
+        }
+    }
+}
+
+/// Returns the (possibly renamed or imported as `gdnative`) identifier of the `gdnative_async` crate,
+/// if found.
+fn crate_gdnative_async() -> proc_macro2::TokenStream {
+    if let Ok(found_crate) = proc_macro_crate::crate_name("gdnative-async") {
+        return match found_crate {
+            proc_macro_crate::FoundCrate::Itself => quote!(crate),
+            proc_macro_crate::FoundCrate::Name(name) => {
+                let ident = proc_macro2::Ident::new(&name, proc_macro2::Span::call_site());
+                ident.to_token_stream()
+            }
+        };
+    }
+
+    let found_crate = proc_macro_crate::crate_name("gdnative").expect("crate not found");
+
+    match found_crate {
+        proc_macro_crate::FoundCrate::Itself => quote!(crate::tasks),
+        proc_macro_crate::FoundCrate::Name(name) => {
+            let ident = proc_macro2::Ident::new(&name, proc_macro2::Span::call_site());
+            quote!( #ident::tasks )
+        }
+    }
+}
+
+/// Returns the (possibly renamed or imported as `gdnative`) identifier of the `gdnative_bindings` crate.
+fn crate_gdnative_bindings() -> proc_macro2::TokenStream {
+    if let Ok(found_crate) = proc_macro_crate::crate_name("gdnative-bindings") {
+        return match found_crate {
+            proc_macro_crate::FoundCrate::Itself => quote!(crate),
+            proc_macro_crate::FoundCrate::Name(name) => {
+                let ident = proc_macro2::Ident::new(&name, proc_macro2::Span::call_site());
+                ident.to_token_stream()
+            }
+        };
+    }
+
+    let found_crate = proc_macro_crate::crate_name("gdnative").expect("crate not found");
+
+    match found_crate {
+        proc_macro_crate::FoundCrate::Itself => quote!(crate::api),
+        proc_macro_crate::FoundCrate::Name(name) => {
+            let ident = proc_macro2::Ident::new(&name, proc_macro2::Span::call_site());
+            quote!( #ident::api )
+        }
+    }
+}
+
+/// Hack to emit a warning in expression position through `deprecated`.
+/// This is because there is no way to emit warnings from macros in stable Rust.
+fn emit_warning<S: std::fmt::Display>(
+    span: proc_macro2::Span,
+    warning_name: &str,
+    message: S,
+) -> proc_macro2::TokenStream {
+    let warning_name = proc_macro2::Ident::new(warning_name, span);
+    let message = message.to_string();
+
+    quote_spanned! { span =>
+        {
+            #[deprecated = #message]
+            fn #warning_name() {}
+            #warning_name()
+        }
     }
 }

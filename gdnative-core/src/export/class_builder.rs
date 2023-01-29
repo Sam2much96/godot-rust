@@ -1,3 +1,6 @@
+use std::any::TypeId;
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::ffi::CString;
 use std::marker::PhantomData;
 use std::ptr;
@@ -7,7 +10,7 @@ use crate::export::*;
 use crate::object::NewRef;
 use crate::private::get_api;
 
-// TODO unify string parameters across all buiders
+// TODO(#996): unify string parameters across all buiders
 // Potential candidates:
 // * &str
 // * impl Into<GodotString>
@@ -20,6 +23,7 @@ use crate::private::get_api;
 pub struct ClassBuilder<C> {
     pub(super) init_handle: *mut libc::c_void,
     pub(super) class_name: CString,
+    mixins: RefCell<HashSet<TypeId, ahash::RandomState>>,
     _marker: PhantomData<C>,
 }
 
@@ -28,6 +32,7 @@ impl<C: NativeClass> ClassBuilder<C> {
         Self {
             init_handle,
             class_name,
+            mixins: RefCell::default(),
             _marker: PhantomData,
         }
     }
@@ -213,17 +218,9 @@ impl<C: NativeClass> ClassBuilder<C> {
     pub(crate) fn add_method(&self, method: ScriptMethod) {
         let method_name = CString::new(method.name).unwrap();
 
-        let rpc = match method.attributes.rpc_mode {
-            RpcMode::Master => sys::godot_method_rpc_mode_GODOT_METHOD_RPC_MODE_MASTER,
-            RpcMode::Remote => sys::godot_method_rpc_mode_GODOT_METHOD_RPC_MODE_REMOTE,
-            RpcMode::Puppet => sys::godot_method_rpc_mode_GODOT_METHOD_RPC_MODE_PUPPET,
-            RpcMode::RemoteSync => sys::godot_method_rpc_mode_GODOT_METHOD_RPC_MODE_REMOTESYNC,
-            RpcMode::Disabled => sys::godot_method_rpc_mode_GODOT_METHOD_RPC_MODE_DISABLED,
-            RpcMode::MasterSync => sys::godot_method_rpc_mode_GODOT_METHOD_RPC_MODE_MASTERSYNC,
-            RpcMode::PuppetSync => sys::godot_method_rpc_mode_GODOT_METHOD_RPC_MODE_PUPPETSYNC,
+        let attr = sys::godot_method_attributes {
+            rpc_type: method.attributes.rpc_mode.sys(),
         };
-
-        let attr = sys::godot_method_attributes { rpc_type: rpc };
 
         let method_desc = sys::godot_instance_method {
             method: method.method_ptr,
@@ -241,4 +238,48 @@ impl<C: NativeClass> ClassBuilder<C> {
             );
         }
     }
+
+    /// Add a mixin to the class being registered.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use gdnative::prelude::*;
+    ///
+    /// #[derive(NativeClass)]
+    /// #[inherit(Node)]
+    /// #[register_with(my_register)]
+    /// #[no_constructor]
+    /// struct MyType {}
+    ///
+    /// // This creates a opaque type `MyMixin` in the current scope that implements
+    /// // the `Mixin` trait. Mixin types have no public interface or stable layout.
+    /// #[methods(mixin = "MyMixin")]
+    /// impl MyType {
+    ///     #[method]
+    ///     fn my_method(&self) -> i64 { 42 }
+    /// }
+    ///
+    /// fn my_register(builder: &ClassBuilder<MyType>) {
+    ///     builder.mixin::<MyMixin>();
+    /// }
+    /// ```
+    #[inline]
+    pub fn mixin<M: Mixin<C>>(&self) {
+        if self.mixins.borrow_mut().insert(TypeId::of::<M>()) {
+            M::register(self);
+        }
+    }
+}
+
+/// Trait for mixins, manually registered `#[methods]` blocks that may be applied to multiple types.
+///
+/// This trait is implemented on generated types by the `#[methods]` proc-macro only, and has no public interface.
+/// Use [`ClassBuilder::mixin`] to register mixins to [`NativeClass`] types.    
+pub trait Mixin<C>: crate::private::mixin::Sealed + 'static
+where
+    C: NativeClass,
+{
+    #[doc(hidden)]
+    fn register(builder: &ClassBuilder<C>);
 }

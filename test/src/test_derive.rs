@@ -1,4 +1,5 @@
 use std::cell::{self, Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use gdnative::export::Property;
@@ -8,6 +9,8 @@ pub(crate) fn run_tests() -> bool {
     let mut status = true;
 
     status &= test_derive_to_variant();
+    status &= test_derive_to_variant_repr();
+    status &= test_derive_to_variant_str();
     status &= test_derive_owned_to_variant();
     status &= test_derive_nativeclass();
     status &= test_derive_nativeclass_without_constructor();
@@ -23,6 +26,7 @@ pub(crate) fn run_tests() -> bool {
     status
 }
 
+#[cfg(not(feature = "no-manual-register"))]
 pub(crate) fn register(handle: InitHandle) {
     handle.add_class::<MinimalDerive>();
     handle.add_class::<EmplacementOnly>();
@@ -36,13 +40,15 @@ pub(crate) fn register(handle: InitHandle) {
     handle.add_class::<MyVec>();
 }
 
+#[cfg(feature = "no-manual-register")]
+pub(crate) fn register(_handle: InitHandle) {}
+
 // ----------------------------------------------------------------------------------------------------------------------------------------------
 
 crate::godot_itest! { test_derive_to_variant {
     #[derive(Clone, Eq, PartialEq, Debug, ToVariant, FromVariant)]
-    struct ToVar<T, R>
+    struct ToVar<T: Associated, R>
     where
-        T: Associated,
         R: Default,
     {
         foo: T::A,
@@ -55,7 +61,7 @@ crate::godot_itest! { test_derive_to_variant {
     }
 
     #[derive(Clone, Eq, PartialEq, Debug, ToVariant, FromVariant)]
-    enum ToVarEnum<T> {
+    enum ToVarEnum<T: Bound> {
         Foo(T),
         Bar,
         Baz { baz: u8 },
@@ -67,9 +73,12 @@ crate::godot_itest! { test_derive_to_variant {
         T: Associated,
         R: Default;
 
+    trait Bound {}
+    impl Bound for bool {}
+
     trait Associated {
         type A;
-        type B;
+        type B : Bound;
     }
 
     impl Associated for f64 {
@@ -144,6 +153,120 @@ crate::godot_itest! { test_derive_to_variant {
         Ok(ToVarTuple::<f64, i128>(1, 0, false)),
         ToVarTuple::from_variant(&variant)
     );
+
+    // Derive on uninhabitable enum results an error
+    #[derive(Debug, PartialEq, FromVariant)]
+    enum NoVariant {}
+
+    let input = HashMap::from_iter([("foo", "bar")]).to_variant();
+    assert_eq!(
+        NoVariant::from_variant(&input),
+        Err(FromVariantError::UnknownEnumVariant {
+            variant: "foo".into(),
+            expected: &[]
+        })
+    );
+}}
+
+// ----------------------------------------------------------------------------------------------------------------------------------------------
+
+crate::godot_itest! { test_derive_to_variant_repr {
+    const ANSWER: u8 = 42;
+
+    #[derive(Copy, Clone, Eq, PartialEq, Debug, ToVariant, FromVariant)]
+    #[variant(enum = "repr")]
+    #[repr(u8)]
+    enum ToVarRepr {
+        A = 0,
+        B,
+        C,
+        D = 128 - 1,
+        E,
+        F = ANSWER,
+    }
+
+    #[derive(Clone, Eq, PartialEq, Debug, OwnedToVariant, FromVariant)]
+    #[variant(enum = "repr")]
+    #[repr(u8)]
+    enum ToVarReprOwned {
+        A = 0,
+        B,
+        C,
+        D = 128 - 1,
+        E,
+        F = ANSWER,
+    }
+
+    let variant = ToVarRepr::A.to_variant();
+    assert_eq!(Some(0), variant.to::<u8>());
+
+    let variant = ToVarRepr::B.to_variant();
+    assert_eq!(Some(1), variant.to::<u8>());
+
+    let variant = ToVarRepr::E.to_variant();
+    assert_eq!(Some(128), variant.to::<u8>());
+
+    let variant = ToVarReprOwned::A.owned_to_variant();
+    assert_eq!(Some(0), variant.to::<u8>());
+
+    let variant = ToVarReprOwned::C.owned_to_variant();
+    assert_eq!(Some(2), variant.to::<u8>());
+
+    let variant = ToVarReprOwned::F.owned_to_variant();
+    assert_eq!(Some(42), variant.to::<u8>());
+
+    assert_eq!(Some(ToVarRepr::A), Variant::new(0).to::<ToVarRepr>());
+    assert_eq!(Some(ToVarRepr::B), Variant::new(1).to::<ToVarRepr>());
+    assert_eq!(Some(ToVarRepr::C), Variant::new(2).to::<ToVarRepr>());
+    assert_eq!(Some(ToVarRepr::D), Variant::new(127).to::<ToVarRepr>());
+    assert_eq!(Some(ToVarRepr::E), Variant::new(128).to::<ToVarRepr>());
+    assert_eq!(Some(ToVarRepr::F), Variant::new(42).to::<ToVarRepr>());
+    assert_eq!(None, Variant::new(48).to::<ToVarRepr>());
+    assert_eq!(None, Variant::new(192).to::<ToVarRepr>());
+}}
+
+// ----------------------------------------------------------------------------------------------------------------------------------------------
+
+crate::godot_itest! { test_derive_to_variant_str {
+    #[derive(Clone, Eq, PartialEq, Debug, ToVariant, FromVariant)]
+    #[variant(enum = "str")]
+    enum ToVarStr {
+        A,
+        B,
+        C,
+    }
+
+    #[derive(Clone, Eq, PartialEq, Debug, OwnedToVariant, FromVariant)]
+    #[variant(enum = "str")]
+    enum ToVarStrOwned {
+        A,
+        B,
+        C,
+    }
+
+    let variant = ToVarStr::A.to_variant();
+    assert_eq!(Some("A"), variant.to::<String>().as_deref());
+
+    let variant = ToVarStr::B.to_variant();
+    assert_eq!(Some("B"), variant.to::<String>().as_deref());
+
+    let variant = ToVarStr::C.to_variant();
+    assert_eq!(Some("C"), variant.to::<String>().as_deref());
+
+    let variant = ToVarStrOwned::A.owned_to_variant();
+    assert_eq!(Some("A"), variant.to::<String>().as_deref());
+
+    let variant = ToVarStrOwned::B.owned_to_variant();
+    assert_eq!(Some("B"), variant.to::<String>().as_deref());
+
+    let variant = ToVarStrOwned::C.owned_to_variant();
+    assert_eq!(Some("C"), variant.to::<String>().as_deref());
+
+    assert_eq!(Some(ToVarStr::A), Variant::new("A").to::<ToVarStr>());
+    assert_eq!(Some(ToVarStr::B), Variant::new("B").to::<ToVarStr>());
+    assert_eq!(Some(ToVarStr::C), Variant::new("C").to::<ToVarStr>());
+    assert_eq!(None, Variant::new("").to::<ToVarStr>());
+    assert_eq!(None, Variant::new("D").to::<ToVarStr>());
 }}
 
 // ----------------------------------------------------------------------------------------------------------------------------------------------

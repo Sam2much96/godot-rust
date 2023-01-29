@@ -96,6 +96,7 @@ type ScriptMethodFn = unsafe extern "C" fn(
     *mut *mut sys::godot_variant,
 ) -> sys::godot_variant;
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum RpcMode {
     Disabled,
     Remote,
@@ -110,6 +111,20 @@ impl Default for RpcMode {
     #[inline]
     fn default() -> Self {
         RpcMode::Disabled
+    }
+}
+
+impl RpcMode {
+    pub(crate) fn sys(self) -> sys::godot_method_rpc_mode {
+        match self {
+            RpcMode::Master => sys::godot_method_rpc_mode_GODOT_METHOD_RPC_MODE_MASTER,
+            RpcMode::Remote => sys::godot_method_rpc_mode_GODOT_METHOD_RPC_MODE_REMOTE,
+            RpcMode::Puppet => sys::godot_method_rpc_mode_GODOT_METHOD_RPC_MODE_PUPPET,
+            RpcMode::RemoteSync => sys::godot_method_rpc_mode_GODOT_METHOD_RPC_MODE_REMOTESYNC,
+            RpcMode::Disabled => sys::godot_method_rpc_mode_GODOT_METHOD_RPC_MODE_DISABLED,
+            RpcMode::MasterSync => sys::godot_method_rpc_mode_GODOT_METHOD_RPC_MODE_MASTERSYNC,
+            RpcMode::PuppetSync => sys::godot_method_rpc_mode_GODOT_METHOD_RPC_MODE_PUPPETSYNC,
+        }
     }
 }
 
@@ -278,7 +293,7 @@ impl<'a> Varargs<'a> {
     /// Returns the remaining arguments as a slice of `Variant`s.
     #[inline]
     pub fn as_slice(&self) -> &'a [&'a Variant] {
-        self.args
+        &self.args[self.idx..]
     }
 
     /// Discard the rest of the arguments, and return an error if there is any.
@@ -489,12 +504,11 @@ impl fmt::Display for VarargsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             VarargsError::InvalidArgumentType { index, error } => {
-                write!(f, "type error for argument #{}: {}", index, error)?
+                write!(f, "type error for argument #{index}: {error}")?
             }
             VarargsError::InvalidLength { expected, length } => write!(
                 f,
-                "length mismatch: expected range {}, actual {}",
-                expected, length
+                "length mismatch: expected range {expected}, actual {length}"
             )?,
         }
 
@@ -572,7 +586,7 @@ impl From<ops::RangeToInclusive<usize>> for IndexBounds {
 impl fmt::Debug for IndexBounds {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "IndexBounds({})", self)
+        write!(f, "IndexBounds({self})")
     }
 }
 
@@ -580,13 +594,13 @@ impl fmt::Display for IndexBounds {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(start) = self.start {
-            write!(f, "{}", start)?
+            write!(f, "{start}")?
         }
 
         write!(f, "..=")?;
 
         if let Some(end) = self.end {
-            write!(f, "{}", end)?
+            write!(f, "{end}")?
         }
 
         Ok(())
@@ -719,7 +733,7 @@ impl<'a> fmt::Display for ArgumentError<'a> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(site) = &self.site {
-            write!(f, "at {}: ", site)?;
+            write!(f, "at {site}: ")?;
         }
         write!(f, "{}", self.kind)
     }
@@ -786,10 +800,10 @@ impl<'a> fmt::Display for ArgumentErrorKind<'a> {
                 idx,
                 name: Some(name),
             } => {
-                write!(f, "missing non-optional parameter `{}` (#{})", name, idx)
+                write!(f, "missing non-optional parameter `{name}` (#{idx})")
             }
             E::Missing { idx, name: None } => {
-                write!(f, "missing non-optional parameter #{}", idx)
+                write!(f, "missing non-optional parameter #{idx}")
             }
             E::CannotConvert {
                 idx,
@@ -799,8 +813,7 @@ impl<'a> fmt::Display for ArgumentErrorKind<'a> {
                 err,
             } => {
                 write!(f,
-                    "cannot convert argument `{}` (#{}, {:?}) to {}: {} (non-primitive types may impose structural checks)",
-                    name, idx, value, ty, err
+                    "cannot convert argument `{name}` (#{idx}, {value:?}) to {ty}: {err} (non-primitive types may impose structural checks)"
                 )
             }
             E::CannotConvert {
@@ -811,8 +824,7 @@ impl<'a> fmt::Display for ArgumentErrorKind<'a> {
                 err,
             } => {
                 write!(f,
-                    "cannot convert argument #{} ({:?}) to {}: {} (non-primitive types may impose structural checks)",
-                    idx, value, ty, err
+                    "cannot convert argument #{idx} ({value:?}) to {ty}: {err} (non-primitive types may impose structural checks)"
                 )
             }
             E::ExcessArguments { rest } => {
@@ -876,11 +888,12 @@ unsafe extern "C" fn method_wrapper<C: NativeClass, F: Method<C>>(
     });
 
     result
-        .unwrap_or_else(|_| {
+        .unwrap_or_else(|e| {
             crate::log::error(
                 F::site().unwrap_or_default(),
                 "gdnative-core: method panicked (check stderr for output)",
             );
+            crate::private::print_panic_error(e);
             Variant::nil()
         })
         .leak()

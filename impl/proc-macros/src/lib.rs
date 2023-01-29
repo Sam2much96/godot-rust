@@ -6,7 +6,9 @@ extern crate syn;
 extern crate quote;
 
 use proc_macro::TokenStream;
+use syn::AttributeArgs;
 
+mod cfg_ex;
 mod doc;
 mod pool_array_element;
 
@@ -24,16 +26,23 @@ pub fn decl_typed_array_element(input: TokenStream) -> TokenStream {
         .into()
 }
 
-/*
-Leaving code commented-out, as this might be very useful elsewhere
-
+/// `#[cfg]` but with custom expansion for GDNative-specific conditional compilation options
 #[proc_macro_attribute]
-pub fn doc_variant_collection_safety(attr: TokenStream, item: TokenStream) -> TokenStream {
-    self::doc::variant_collection_safety(attr, item)
-        .unwrap_or_else(to_compile_errors)
-        .into()
+pub fn cfg_ex(meta: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(meta as AttributeArgs);
+    let attr = cfg_ex::expand_cfg_ex(args).unwrap_or_else(to_compile_errors);
+    let item = proc_macro2::TokenStream::from(item);
+    quote!(#attr #item).into()
 }
-*/
+
+/// `#[cfg_attr]` but with custom expansion for GDNative-specific conditional compilation options
+#[proc_macro_attribute]
+pub fn cfg_attr_ex(meta: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(meta as AttributeArgs);
+    let attr = cfg_ex::expand_cfg_attr_ex(args).unwrap_or_else(to_compile_errors);
+    let item = proc_macro2::TokenStream::from(item);
+    quote!(#attr #item).into()
+}
 
 fn to_compile_errors(error: syn::Error) -> proc_macro2::TokenStream {
     let compile_error = error.to_compile_error();

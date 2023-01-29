@@ -15,6 +15,7 @@ pub(crate) fn run_tests() -> bool {
     status
 }
 
+#[cfg(not(feature = "no-manual-register"))]
 pub(crate) fn register(handle: InitHandle) {
     handle.add_class::<RegisterSignal>();
     handle.add_class::<RegisterProperty>();
@@ -23,16 +24,22 @@ pub(crate) fn register(handle: InitHandle) {
     handle.add_class::<VarargsToTuple>();
 }
 
+#[cfg(feature = "no-manual-register")]
+pub(crate) fn register(handle: InitHandle) {
+    handle.add_class::<RegisterSignal>();
+    handle.add_class::<RegisterProperty>();
+}
+
 #[derive(Copy, Clone, Debug, Default)]
 struct RegisterSignal;
 
 impl NativeClass for RegisterSignal {
     type Base = Reference;
     type UserData = user_data::Aether<RegisterSignal>;
-    fn init(_owner: TRef<Reference>) -> RegisterSignal {
+    fn nativeclass_init(_owner: TRef<Reference>) -> RegisterSignal {
         RegisterSignal
     }
-    fn register_properties(builder: &ClassBuilder<Self>) {
+    fn nativeclass_register_properties(builder: &ClassBuilder<Self>) {
         builder
             .signal("progress")
             .with_param("amount", VariantType::I64)
@@ -54,10 +61,10 @@ struct RegisterProperty {
 impl NativeClass for RegisterProperty {
     type Base = Reference;
     type UserData = user_data::MutexData<RegisterProperty>;
-    fn init(_owner: TRef<Reference>) -> RegisterProperty {
+    fn nativeclass_init(_owner: TRef<Reference>) -> RegisterProperty {
         RegisterProperty { value: 42 }
     }
-    fn register_properties(builder: &ClassBuilder<Self>) {
+    fn nativeclass_register_properties(builder: &ClassBuilder<Self>) {
         builder
             .property("value")
             .with_default(42)

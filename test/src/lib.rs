@@ -1,4 +1,4 @@
-#![allow(clippy::blacklisted_name)]
+#![allow(clippy::disallowed_names)]
 #![allow(deprecated)]
 
 use gdnative::prelude::*;
@@ -9,6 +9,8 @@ mod test_async;
 mod test_constructor;
 mod test_derive;
 mod test_free_ub;
+mod test_generic_class;
+mod test_indexed_props;
 mod test_map_owned;
 mod test_register;
 mod test_return_leak;
@@ -28,11 +30,11 @@ pub extern "C" fn run_tests(
     status &= gdnative::core_types::test_string_name_ord();
 
     status &= gdnative::core_types::test_dictionary();
-    // status &= gdnative::test_dictionary_clone_clear();
+    status &= gdnative::core_types::test_dictionary_clone_clear();
     status &= gdnative::core_types::test_color();
     status &= gdnative::core_types::test_array();
     status &= gdnative::core_types::test_array_debug();
-    // status &= gdnative::test_array_clone_clear();
+    status &= gdnative::core_types::test_array_clone_clear();
 
     status &= gdnative::core_types::test_variant_nil();
     status &= gdnative::core_types::test_variant_i64();
@@ -67,15 +69,18 @@ pub extern "C" fn run_tests(
     status &= gdnative::core_types::test_vector3_array_debug();
     status &= gdnative::core_types::test_transform2d_behavior();
 
-    status &= test_underscore_method_binding();
-    status &= test_rust_class_construction();
     status &= test_from_instance_id();
+    status &= test_nil_object_return_value();
+    status &= test_rust_class_construction();
+    status &= test_underscore_method_binding();
 
     status &= test_as_arg::run_tests();
     status &= test_async::run_tests();
     status &= test_constructor::run_tests();
     status &= test_derive::run_tests();
     status &= test_free_ub::run_tests();
+    status &= test_generic_class::run_tests();
+    status &= test_indexed_props::run_tests();
     status &= test_map_owned::run_tests();
     status &= test_register::run_tests();
     status &= test_return_leak::run_tests();
@@ -87,11 +92,21 @@ pub extern "C" fn run_tests(
     Variant::new(status).leak()
 }
 
-godot_itest! { test_underscore_method_binding {
-    let script = gdnative::api::NativeScript::new();
-    let result = script._new(&[]);
-    assert_eq!(Variant::nil(), result);
-}}
+godot_itest! {
+    test_underscore_method_binding {
+        let script = gdnative::api::NativeScript::new();
+        let result = script._new(&[]);
+        assert_eq!(Variant::nil(), result);
+    }
+
+    test_nil_object_return_value {
+        let node = Node::new();
+        // Should not panic due to conversion failure
+        let option = node.get_node("does not exist");
+        assert!(option.is_none());
+        node.free();
+    }
+}
 
 #[derive(NativeClass)]
 #[inherit(Reference)]
@@ -135,10 +150,13 @@ impl Foo {
         match what.as_str() {
             "int" => a.to_variant(),
             "float" => b.to_variant(),
-            _ => panic!("should be int or float, got {:?}", what),
+            _ => panic!("should be int or float, got {what:?}"),
         }
     }
 }
+
+#[methods]
+impl NotFoo {}
 
 godot_itest! { test_rust_class_construction {
     let foo = Foo::new_instance();
@@ -214,25 +232,41 @@ godot_itest! { test_from_instance_id {
 
         assert!(unsafe { Node::try_from_instance_id(instance_id).is_none() });
 
-        let reconstructed = unsafe { Reference::from_instance_id(instance_id) };
-        assert_eq!(
-            "bar",
-            String::from_variant(&reconstructed.get_meta("foo")).unwrap()
-        );
+        // get_meta() got a new default parameter in Godot 3.5, which is a breaking change in Rust
+        // So we cannot run this automated test for older Godot versions in CI
+        #[cfg(not(feature = "custom-godot"))]
+        {
+            let reconstructed = unsafe { Reference::from_instance_id(instance_id) };
+            assert_eq!(
+                "bar",
+                String::from_variant(&reconstructed.get_meta("foo", Variant::nil())).unwrap()
+            );
+        }
     }
 
     assert!(unsafe { Reference::try_from_instance_id(instance_id).is_none() });
 }}
 
+#[cfg(not(feature = "no-manual-register"))]
 fn init(handle: InitHandle) {
     handle.add_class::<Foo>();
     handle.add_class::<OptionalArgs>();
+    delegate_init(handle);
+}
 
+#[cfg(feature = "no-manual-register")]
+fn init(handle: InitHandle) {
+    delegate_init(handle);
+}
+
+fn delegate_init(handle: InitHandle) {
     test_as_arg::register(handle);
     test_async::register(handle);
     test_constructor::register(handle);
     test_derive::register(handle);
     test_free_ub::register(handle);
+    test_generic_class::register(handle);
+    test_indexed_props::register(handle);
     test_map_owned::register(handle);
     test_register::register(handle);
     test_return_leak::register(handle);

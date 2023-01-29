@@ -44,15 +44,17 @@ impl GodotXmlDocs {
             .find(|node| node.tag_name().name() == "class")
         {
             if let Some(class_name) = class.attribute("name") {
-                let methods_node = class
-                    .descendants()
-                    .find(|node| node.tag_name().name() == "methods");
-                self.parse_methods(class_name, methods_node);
-
+                // Parse members first, so more general docs for indexed accessors can be used
+                // if they exist.
                 let members_node = class
                     .descendants()
                     .find(|node| node.tag_name().name() == "members");
                 self.parse_members(class_name, members_node);
+
+                let methods_node = class
+                    .descendants()
+                    .find(|node| node.tag_name().name() == "methods");
+                self.parse_methods(class_name, methods_node);
             }
         }
     }
@@ -62,6 +64,16 @@ impl GodotXmlDocs {
             for node in members.descendants() {
                 if node.tag_name().name() == "member" {
                     if let Some(desc) = node.text() {
+                        if let Some(property_name) = node.attribute("name") {
+                            if !property_name.contains('/') {
+                                if node.has_attribute("setter") {
+                                    self.add_fn(class, &format!("set_{property_name}"), desc, &[]);
+                                }
+                                if node.has_attribute("getter") {
+                                    self.add_fn(class, &format!("get_{property_name}"), desc, &[]);
+                                }
+                            }
+                        }
                         if let Some(func) = node.attribute("setter") {
                             self.add_fn(class, func, desc, &[]);
                         }
@@ -141,13 +153,13 @@ impl GodotXmlDocs {
             "RID" => "Rid",
             "AABB" => "Aabb",
             "Array" => "VariantArray",
-            "PoolByteArray" => "ByteArray",
-            "PoolStringArray" => "StringArray",
-            "PoolVector2Array" => "Vector2Array",
-            "PoolVector3Array" => "Vector3Array",
-            "PoolColorArray" => "ColorArray",
-            "PoolIntArray" => "Int32Array",
-            "PoolRealArray" => "Float32Array",
+            "PoolByteArray" => "PoolArray<u8>",
+            "PoolStringArray" => "PoolArray<GodotString>",
+            "PoolVector2Array" => "PoolArray<Vector2>",
+            "PoolVector3Array" => "PoolArray<Vector3>",
+            "PoolColorArray" => "PoolArray<Color>",
+            "PoolIntArray" => "PoolArray<i32>",
+            "PoolRealArray" => "PoolArray<f32>",
             "G6DOFJointAxisParam" => "G6dofJointAxisParam",
             "G6DOFJointAxisFlag" => "G6dofJointAxisFlag",
             _ => godot_type,
@@ -165,10 +177,7 @@ impl GodotXmlDocs {
 
         // Info for GDScript blocks
         let godot_doc = if godot_doc.contains("[codeblock]") {
-            format!(
-                "_Sample code is GDScript unless otherwise noted._\n\n{}",
-                godot_doc
-            )
+            format!("_Sample code is GDScript unless otherwise noted._\n\n{godot_doc}")
         } else {
             godot_doc
         };
@@ -191,9 +200,9 @@ impl GodotXmlDocs {
             let text = &c[2];
 
             if text.is_empty() {
-                format!("<{url}>", url = url)
+                format!("<{url}>")
             } else {
-                format!("[{text}]({url})", text = text, url = url)
+                format!("[{text}]({url})")
             }
         });
 
@@ -225,11 +234,7 @@ impl GodotXmlDocs {
             let godot_ty = &c[2];
             let rust_ty = Self::translate_type(godot_ty);
 
-            format!(
-                "[`{godot_ty}`][{rust_ty}]",
-                godot_ty = godot_ty,
-                rust_ty = rust_ty
-            )
+            format!("[`{godot_ty}`][{rust_ty}]")
         });
 
         godot_doc.to_string()

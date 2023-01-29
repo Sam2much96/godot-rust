@@ -15,8 +15,6 @@ use crate::private::{get_api, ManuallyManagedClassPlaceholder};
 #[cfg(feature = "serde")]
 mod serialize;
 
-// TODO: implement Debug, PartialEq, etc.
-
 /// A `Variant` can represent all Godot values (core types or `Object` class instances).
 ///
 /// The underlying data is either stored inline or reference-counted on the heap,
@@ -157,17 +155,18 @@ decl_variant_type!(
         Object(Variant) = sys::godot_variant_type_GODOT_VARIANT_TYPE_OBJECT,
         Dictionary(Dictionary) = sys::godot_variant_type_GODOT_VARIANT_TYPE_DICTIONARY,
         VariantArray(VariantArray) = sys::godot_variant_type_GODOT_VARIANT_TYPE_ARRAY,
-        ByteArray(ByteArray) = sys::godot_variant_type_GODOT_VARIANT_TYPE_POOL_BYTE_ARRAY,
-        Int32Array(Int32Array) = sys::godot_variant_type_GODOT_VARIANT_TYPE_POOL_INT_ARRAY,
-        Float32Array(Float32Array) = sys::godot_variant_type_GODOT_VARIANT_TYPE_POOL_REAL_ARRAY,
-        StringArray(StringArray) = sys::godot_variant_type_GODOT_VARIANT_TYPE_POOL_STRING_ARRAY,
-        Vector2Array(Vector2Array) = sys::godot_variant_type_GODOT_VARIANT_TYPE_POOL_VECTOR2_ARRAY,
-        Vector3Array(Vector3Array) = sys::godot_variant_type_GODOT_VARIANT_TYPE_POOL_VECTOR3_ARRAY,
-        ColorArray(ColorArray) = sys::godot_variant_type_GODOT_VARIANT_TYPE_POOL_COLOR_ARRAY,
+        ByteArray(PoolArray<u8>) = sys::godot_variant_type_GODOT_VARIANT_TYPE_POOL_BYTE_ARRAY,
+        Int32Array(PoolArray<i32>) = sys::godot_variant_type_GODOT_VARIANT_TYPE_POOL_INT_ARRAY,
+        Float32Array(PoolArray<f32>) = sys::godot_variant_type_GODOT_VARIANT_TYPE_POOL_REAL_ARRAY,
+        StringArray(PoolArray<GodotString>) = sys::godot_variant_type_GODOT_VARIANT_TYPE_POOL_STRING_ARRAY,
+        Vector2Array(PoolArray<Vector2>) = sys::godot_variant_type_GODOT_VARIANT_TYPE_POOL_VECTOR2_ARRAY,
+        Vector3Array(PoolArray<Vector3>) = sys::godot_variant_type_GODOT_VARIANT_TYPE_POOL_VECTOR3_ARRAY,
+        ColorArray(PoolArray<Color>) = sys::godot_variant_type_GODOT_VARIANT_TYPE_POOL_COLOR_ARRAY,
     }
 );
 
 impl VariantType {
+    #[allow(clippy::unnecessary_cast)] // False positives: casts necessary for cross-platform
     #[doc(hidden)]
     #[inline]
     pub fn from_sys(v: sys::godot_variant_type) -> VariantType {
@@ -184,6 +183,7 @@ impl VariantType {
     }
 }
 
+#[allow(clippy::unnecessary_cast)] // False positives: casts necessary for cross-platform
 #[repr(u32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum CallError {
@@ -200,6 +200,7 @@ pub enum CallError {
 }
 
 impl CallError {
+    #[allow(clippy::unnecessary_cast)] // False positives: casts necessary for cross-platform
     #[inline]
     fn from_sys(v: sys::godot_variant_call_error_error) -> Result<(), CallError> {
         if v == sys::godot_variant_call_error_error_GODOT_CALL_ERROR_CALL_OK {
@@ -232,6 +233,7 @@ impl std::fmt::Display for CallError {
 impl std::error::Error for CallError {}
 
 /// Godot variant operator kind.
+#[allow(clippy::unnecessary_cast)] // False positives: casts necessary for cross-platform
 #[repr(u32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum VariantOperator {
@@ -271,6 +273,7 @@ pub enum VariantOperator {
     In = sys::godot_variant_operator_GODOT_VARIANT_OP_IN as u32,
 }
 
+#[allow(clippy::unnecessary_cast)] // False positives: casts necessary for cross-platform
 impl VariantOperator {
     const MAX: u32 = sys::godot_variant_operator_GODOT_VARIANT_OP_MAX as u32;
 
@@ -448,7 +451,14 @@ impl Variant {
     /// Returns true if this is an empty variant.
     #[inline]
     pub fn is_nil(&self) -> bool {
-        self.get_type() == VariantType::Nil
+        match self.get_type() {
+            VariantType::Nil => true,
+            VariantType::Object => {
+                let ptr = unsafe { (get_api().godot_variant_as_object)(&self.0) };
+                ptr.is_null()
+            }
+            _ => false,
+        }
     }
 
     #[inline]
@@ -588,13 +598,13 @@ impl_coerce_from_variant!(
     impl CoerceFromVariant for GodotString = from_sys(godot_variant_as_string);
     impl CoerceFromVariant for Rid = from_sys(godot_variant_as_rid);
     impl CoerceFromVariant for VariantArray<Shared> = from_sys(godot_variant_as_array);
-    impl CoerceFromVariant for ByteArray = from_sys(godot_variant_as_pool_byte_array);
-    impl CoerceFromVariant for Int32Array = from_sys(godot_variant_as_pool_int_array);
-    impl CoerceFromVariant for Float32Array = from_sys(godot_variant_as_pool_real_array);
-    impl CoerceFromVariant for StringArray = from_sys(godot_variant_as_pool_string_array);
-    impl CoerceFromVariant for Vector2Array = from_sys(godot_variant_as_pool_vector2_array);
-    impl CoerceFromVariant for Vector3Array = from_sys(godot_variant_as_pool_vector3_array);
-    impl CoerceFromVariant for ColorArray = from_sys(godot_variant_as_pool_color_array);
+    impl CoerceFromVariant for PoolArray<u8> = from_sys(godot_variant_as_pool_byte_array);
+    impl CoerceFromVariant for PoolArray<i32> = from_sys(godot_variant_as_pool_int_array);
+    impl CoerceFromVariant for PoolArray<f32> = from_sys(godot_variant_as_pool_real_array);
+    impl CoerceFromVariant for PoolArray<GodotString> = from_sys(godot_variant_as_pool_string_array);
+    impl CoerceFromVariant for PoolArray<Vector2> = from_sys(godot_variant_as_pool_vector2_array);
+    impl CoerceFromVariant for PoolArray<Vector3> = from_sys(godot_variant_as_pool_vector3_array);
+    impl CoerceFromVariant for PoolArray<Color> = from_sys(godot_variant_as_pool_color_array);
     impl CoerceFromVariant for Dictionary<Shared> = from_sys(godot_variant_as_dictionary);
 );
 
@@ -633,7 +643,6 @@ impl fmt::Debug for Variant {
 godot_test!(
     test_variant_nil {
         let nil = Variant::nil();
-        assert_eq!(nil.get_type(), VariantType::Nil);
         assert!(nil.is_nil());
 
         assert!(nil.try_to::<VariantArray>().is_err());
@@ -709,9 +718,22 @@ godot_test!(
 /// - `Struct { a, b, c }` is represented as a `Dictionary` (`{ "a": a, "b": b, "c": c }`)
 /// - `Unit` is represented as an empty `Dictionary` (`{}`)
 /// - `Enum::Variant(a, b, c)` is represented as an externally tagged `Dictionary`
-///   (`{ "Variant": [a, b, c] }`)
+///   (`{ "Variant": [a, b, c] }`), unless another representation is specified with
+///   `#[variant(enum)]` (see below).
 ///
 /// Behavior of the derive macros can be customized using attributes:
+///
+/// ### Item attributes
+///
+/// - `#[variant(enum = "str")]`
+///
+/// Only applicable to field-less enums. Variants of types annotated with this attribute
+/// are represented as stringified values of their names, i.e. `"Variant"` for `Enum::Variant`.
+///
+/// - `#[variant(enum = "repr")]`
+///
+/// Only applicable to field-less enums with a explicit primitive `#[repr]` type. Variants of
+/// types annotated with this attribute are represented as their primitive integral values.
 ///
 /// ### Field attributes
 ///
@@ -917,7 +939,7 @@ impl FromVariantError {
     /// Returns a `FromVariantError` with a custom message.
     #[inline]
     pub fn custom<T: fmt::Display>(message: T) -> Self {
-        FromVariantError::Custom(format!("{}", message))
+        FromVariantError::Custom(format!("{message}"))
     }
 }
 
@@ -928,38 +950,31 @@ impl fmt::Display for FromVariantError {
 
         match self {
             E::Unspecified => write!(f, "unspecified error"),
-            E::Custom(s) => write!(f, "{}", s),
+            E::Custom(s) => write!(f, "{s}"),
             E::InvalidNil => write!(f, "expected non-nullable type, got null"),
             E::InvalidVariantType {
                 variant_type,
                 expected,
             } => write!(
                 f,
-                "invalid variant type: expected {:?}, got {:?}",
-                expected, variant_type
+                "invalid variant type: expected {expected:?}, got {variant_type:?}"
             ),
             E::CannotCast { class, to } => {
-                write!(f, "cannot cast object of class {} to {}", class, to)
+                write!(f, "cannot cast object of class {class} to {to}")
             }
             E::InvalidLength { len, expected } => {
-                write!(f, "expected collection of length {}, got {}", expected, len)
+                write!(f, "expected collection of length {expected}, got {len}")
             }
             E::InvalidEnumRepr { expected, error } => write!(
                 f,
-                "invalid enum representation: expected {:?}, {}",
-                expected, error
+                "invalid enum representation: expected {expected:?}, {error}"
             ),
             E::InvalidStructRepr { expected, error } => write!(
                 f,
-                "invalid struct representation: expected {:?}, {}",
-                expected, error
+                "invalid struct representation: expected {expected:?}, {error}"
             ),
             E::UnknownEnumVariant { variant, expected } => {
-                write!(
-                    f,
-                    "unknown enum variant {}, expected variants are: ",
-                    variant
-                )?;
+                write!(f, "unknown enum variant {variant}, expected variants are: ")?;
                 let mut first = true;
                 for v in *expected {
                     if first {
@@ -967,39 +982,39 @@ impl fmt::Display for FromVariantError {
                     } else {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}", v)?;
+                    write!(f, "{v}")?;
                 }
                 Ok(())
             }
             E::InvalidEnumVariant { variant, error } => {
-                write!(f, "invalid value for variant {}: {}", variant, error)
+                write!(f, "invalid value for variant {variant}: {error}")
             }
             E::InvalidInstance { expected } => {
-                write!(f, "object is not an instance of `NativeClass` {}", expected)
+                write!(f, "object is not an instance of `NativeClass` {expected}")
             }
             E::InvalidField { field_name, error } => {
-                write!(f, "invalid value for field {}", field_name)?;
+                write!(f, "invalid value for field {field_name}")?;
 
                 let mut next_error = error.as_ref();
                 loop {
                     match next_error {
                         E::InvalidField { field_name, error } => {
-                            write!(f, ".{}", field_name)?;
+                            write!(f, ".{field_name}")?;
                             next_error = error.as_ref();
                         }
                         E::InvalidItem { index, error } => {
-                            write!(f, "[{}]", index)?;
+                            write!(f, "[{index}]")?;
                             next_error = error.as_ref();
                         }
                         _ => {
-                            write!(f, ": {}", next_error)?;
+                            write!(f, ": {next_error}")?;
                             return Ok(());
                         }
                     }
                 }
             }
             E::InvalidItem { index, error } => {
-                write!(f, "invalid value for item at index {}: {}", index, error)
+                write!(f, "invalid value for item at index {index}: {error}")
             }
         }
     }
@@ -1025,7 +1040,14 @@ impl ToVariantEq for () {}
 impl FromVariant for () {
     #[inline]
     fn from_variant(variant: &Variant) -> Result<Self, FromVariantError> {
-        variant.try_as_sys_of_type(VariantType::Nil).map(|_| ())
+        if variant.is_nil() {
+            return Ok(());
+        }
+
+        Err(FromVariantError::InvalidVariantType {
+            variant_type: variant.get_type(),
+            expected: VariantType::Nil,
+        })
     }
 }
 
@@ -1424,9 +1446,14 @@ impl<T> ToVariantEq for std::marker::PhantomData<T> {}
 impl<T> FromVariant for std::marker::PhantomData<T> {
     #[inline]
     fn from_variant(variant: &Variant) -> Result<Self, FromVariantError> {
-        variant
-            .try_as_sys_of_type(VariantType::Nil)
-            .map(|_| std::marker::PhantomData)
+        if variant.is_nil() {
+            return Ok(std::marker::PhantomData);
+        }
+
+        Err(FromVariantError::InvalidVariantType {
+            variant_type: variant.get_type(),
+            expected: VariantType::Nil,
+        })
     }
 }
 

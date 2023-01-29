@@ -1,4 +1,5 @@
 use std::ffi::CString;
+use std::panic::{catch_unwind, UnwindSafe};
 
 use crate::sys;
 
@@ -168,7 +169,7 @@ unsafe fn report_init_error(
             got,
         } => {
             if let Some(f) = (*options).report_version_mismatch {
-                let message = CString::new(format!("{}", api_type)).unwrap();
+                let message = CString::new(format!("{api_type}")).unwrap();
                 f((*options).gd_native_library, message.as_ptr(), want, got);
             }
         }
@@ -181,8 +182,60 @@ unsafe fn report_init_error(
     }
 }
 
+#[inline]
+pub fn report_panics(context: &str, callback: impl FnOnce() + UnwindSafe) {
+    let __result = catch_unwind(callback);
+
+    if let Err(e) = __result {
+        godot_error!("gdnative-core: {} callback panicked", context);
+        print_panic_error(e);
+    }
+}
+
+pub(crate) fn print_panic_error(err: Box<dyn std::any::Any + Send>) {
+    if let Some(s) = err.downcast_ref::<String>() {
+        godot_error!("Panic message: {}", s);
+    } else if let Some(s) = err.downcast_ref::<&'static str>() {
+        godot_error!("Panic message: {}", s);
+    } else {
+        godot_error!("Panic message unknown, type {:?}", err.type_id());
+    }
+}
+
+/// Plugin type to be used by macros for auto class registration.
+pub struct AutoInitPlugin {
+    pub f: fn(init_handle: crate::init::InitHandle),
+}
+
+#[cfg(feature = "inventory")]
+pub mod inventory {
+    pub use inventory::{collect, submit};
+
+    inventory::collect!(super::AutoInitPlugin);
+}
+
+#[cfg(not(feature = "inventory"))]
+pub mod inventory {
+    pub use crate::_inventory_discard as submit;
+    pub use crate::_inventory_discard as collect;
+
+    #[macro_export]
+    #[doc(hidden)]
+    macro_rules! _inventory_discard {
+        ($($tt:tt)*) => {};
+    }
+}
+
 pub mod godot_object {
     pub trait Sealed {}
+}
+
+pub mod mixin {
+    pub trait Sealed {}
+
+    pub struct Opaque {
+        _private: (),
+    }
 }
 
 pub(crate) struct ManuallyManagedClassPlaceholder;

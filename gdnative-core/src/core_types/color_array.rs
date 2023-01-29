@@ -4,13 +4,14 @@ use crate::core_types::PoolArray;
 /// A reference-counted vector of `Color` that uses Godot's pool allocator.
 ///
 /// See [`PoolColorArray`](https://docs.godotengine.org/en/stable/classes/class_poolcolorarray.html) in Godot.
+#[deprecated = "Specialized pool array aliases will be removed in a future godot-rust version. Use PoolArray<T> instead."]
 pub type ColorArray = PoolArray<Color>;
 
 godot_test!(
     test_color_array_access {
         use crate::object::NewRef as _;
 
-        let arr = ColorArray::from_vec(vec![
+        let arr = PoolArray::from_vec(vec![
             Color::from_rgb(1.0, 0.0, 0.0),
             Color::from_rgb(0.0, 1.0, 0.0),
             Color::from_rgb(0.0, 0.0, 1.0),
@@ -23,7 +24,7 @@ godot_test!(
                 Color::from_rgb(0.0, 1.0, 0.0),
                 Color::from_rgb(0.0, 0.0, 1.0),
             ], read.as_slice());
-            read.clone()
+            read
         };
 
         let mut cow_arr = arr.new_ref();
@@ -51,12 +52,12 @@ godot_test!(
 
 godot_test!(
     test_color_array_debug {
-        let arr = ColorArray::from_vec(vec![
+        let arr = PoolArray::from_vec(vec![
             Color::from_rgb(1.0, 0.0, 0.0),
             Color::from_rgb(0.0, 1.0, 0.0),
             Color::from_rgb(0.0, 0.0, 1.0),
         ]);
 
-        assert_eq!(format!("{:?}", arr), "[Color { r: 1.0, g: 0.0, b: 0.0, a: 1.0 }, Color { r: 0.0, g: 1.0, b: 0.0, a: 1.0 }, Color { r: 0.0, g: 0.0, b: 1.0, a: 1.0 }]");
+        assert_eq!(format!("{arr:?}"), "[Color { r: 1.0, g: 0.0, b: 0.0, a: 1.0 }, Color { r: 0.0, g: 1.0, b: 0.0, a: 1.0 }, Color { r: 0.0, g: 0.0, b: 1.0, a: 1.0 }]");
     }
 );

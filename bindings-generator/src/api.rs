@@ -435,13 +435,13 @@ impl Ty {
             Ty::Rid => syn::parse_quote! { Rid },
             Ty::VariantArray => syn::parse_quote! { VariantArray },
             Ty::Dictionary => syn::parse_quote! { Dictionary },
-            Ty::ByteArray => syn::parse_quote! { ByteArray },
-            Ty::StringArray => syn::parse_quote! { StringArray },
-            Ty::Vector2Array => syn::parse_quote! { Vector2Array },
-            Ty::Vector3Array => syn::parse_quote! { Vector3Array },
-            Ty::ColorArray => syn::parse_quote! { ColorArray },
-            Ty::Int32Array => syn::parse_quote! { Int32Array },
-            Ty::Float32Array => syn::parse_quote! { Float32Array },
+            Ty::ByteArray => syn::parse_quote! { PoolArray<u8> },
+            Ty::StringArray => syn::parse_quote! { PoolArray<GodotString> },
+            Ty::Vector2Array => syn::parse_quote! { PoolArray<Vector2> },
+            Ty::Vector3Array => syn::parse_quote! { PoolArray<Vector3> },
+            Ty::ColorArray => syn::parse_quote! { PoolArray<Color> },
+            Ty::Int32Array => syn::parse_quote! { PoolArray<i32> },
+            Ty::Float32Array => syn::parse_quote! { PoolArray<f32> },
             Ty::Result => syn::parse_quote! { GodotResult },
             Ty::VariantType => syn::parse_quote! { VariantType },
             Ty::VariantOperator => syn::parse_quote! { VariantOperator },
@@ -590,7 +590,7 @@ impl Ty {
             | Ty::Variant => {
                 let rust_ty = self.to_rust();
                 quote! {
-                    #rust_ty::from_sys(ret)
+                    <#rust_ty>::from_sys(ret)
                 }
             }
             Ty::Object(ref path) => {
@@ -608,6 +608,48 @@ impl Ty {
             Ty::VariantOperator => {
                 quote! {
                     VariantOperator::try_from_sys(ret as _).expect("enum variant should be valid")
+                }
+            }
+        }
+    }
+
+    pub fn to_return_post_variant(&self) -> TokenStream {
+        match self {
+            Ty::Void => Default::default(),
+            Ty::F64 | Ty::I64 | Ty::Bool => {
+                let rust_type = self.to_rust();
+                quote! {
+                    <#rust_type>::coerce_from_variant(&ret)
+                }
+            }
+
+            // The `sys` type aliases here can point to different types depending on the platform.
+            // Do not simplify to (Linux) primitive types.
+            Ty::Result => {
+                quote! { GodotError::result_from_sys(sys::godot_error::from_variant(&ret).expect("Unexpected variant type")) }
+            }
+            Ty::VariantType => {
+                quote! { VariantType::from_sys(sys::godot_variant_type::from_variant(&ret).expect("Unexpected variant type")) }
+            }
+            Ty::VariantOperator => {
+                quote! {
+                    VariantOperator::try_from_sys(sys::godot_variant_operator::from_variant(&ret).expect("Unexpected variant type"))
+                        .expect("enum variant should be valid")
+                }
+            }
+
+            Ty::Vector3Axis => {
+                quote! {
+                    unsafe {
+                        mem::transmute::<u32, Axis>(u32::from_variant(&ret).expect("Unexpected variant type") as _)
+                    }
+                }
+            }
+            _ => {
+                let rust_type = self.to_rust();
+                // always a variant returned, use FromVariant
+                quote! {
+                    <#rust_type>::from_variant(&ret).expect("Unexpected variant type")
                 }
             }
         }
@@ -743,7 +785,7 @@ mod tests {
         ];
         tests.iter().for_each(|(class_name, expected)| {
             let actual = module_name_from_class_name(class_name);
-            assert_eq!(*expected, actual, "Input: {}", class_name);
+            assert_eq!(*expected, actual, "Input: {class_name}");
         });
     }
 }

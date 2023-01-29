@@ -25,11 +25,6 @@
 name: Full CI
 
 env:
-  # Environment variables used by toolchain
-  CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: 0
-  RUST_BACKTRACE: 1
-
   # Local variables
   # Note: using variables is limited at the moment, see https://github.com/actions/runner/issues/480
   GDRUST_FEATURES: "gdnative/async,gdnative/serde,gdnative_bindings_generator/debug"
@@ -135,7 +130,7 @@ jobs:
           - rust: { toolchain: 'nightly' }
             testflags: '-- --skip ui_tests'
           - os: { id: ubuntu-latest, name: linux }
-            rust: { toolchain: '1.56', postfix: ' (msrv 1.56)' }
+            rust: { toolchain: '1.63', postfix: ' (msrv 1.63)' }
             testflags: '-- --skip ui_tests'
           - os: { id: ubuntu-latest, name: linux }
             rust: { toolchain: 'stable', postfix: ' (minimal-deps)', special: 'minimal-deps' }
@@ -276,21 +271,54 @@ jobs:
         include:
           # Latest Godot with different Rust versions
           - rust: stable
-            godot: "3.4.3"
+            godot: "3.5.1-stable"
             postfix: ''
+          - rust: stable
+            godot: "3.5.1-stable"
+            postfix: ' (ptrcall)'
+            build_args: '--features ptrcall'
+          - rust: stable
+            godot: "3.5.1-stable"
+            postfix: ' (inventory)'
+            build_args: '--features inventory'
+          - rust: stable
+            godot: "3.5.1-stable"
+            postfix: ' (inventory)'
+            # Limiting no-manual-register tests to stable as to not slow down CI too far -- if inventory is
+            # working across all 3 Rust versions, this is likely to be as well.
+            build_args: '--features inventory,no-manual-register'
           - rust: nightly
-            godot: "3.4.3"
+            godot: "3.5.1-stable"
             postfix: ' (nightly)'
-          - rust: '1.56'
-            godot: "3.4.3"
-            postfix: ' (msrv 1.56)'
+          - rust: nightly
+            godot: "3.5.1-stable"
+            postfix: ' (nightly, ptrcall)'
+            build_args: '--features ptrcall'
+          - rust: nightly
+            godot: "3.5.1-stable"
+            postfix: ' (nightly, inventory)'
+            build_args: '--features inventory'
+          - rust: '1.63'
+            godot: "3.5.1-stable"
+            postfix: ' (msrv 1.63)'
+          - rust: '1.63'
+            godot: "3.5.1-stable"
+            postfix: ' (msrv 1.63, ptrcall)'
+            build_args: '--features ptrcall'
+          - rust: '1.63'
+            godot: "3.5.1-stable"
+            postfix: ' (msrv 1.63, inventory)'
+            build_args: '--features inventory'
 
           # Test with oldest supported engine version
           - rust: stable
-            godot: "3.2"
+            godot: "3.2-stable"
             postfix: ''
             build_args: '--features custom-godot'
-
+          - rust: stable
+            godot: "3.2-stable"
+            postfix: ' (ptrcall)'
+            build_args: '--features custom-godot,ptrcall'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3

@@ -4,13 +4,14 @@ use crate::core_types::Vector2;
 /// A reference-counted vector of `Vector2` that uses Godot's pool allocator.
 ///
 /// See [`PoolVector2Array`](https://docs.godotengine.org/en/stable/classes/class_poolvector2array.html) in Godot.
+#[deprecated = "Specialized pool array aliases will be removed in a future godot-rust version. Use PoolArray<T> instead."]
 pub type Vector2Array = PoolArray<Vector2>;
 
 godot_test!(
     test_vector2_array_access {
         use crate::object::NewRef as _;
 
-        let arr = Vector2Array::from_vec(vec![
+        let arr = PoolArray::from_vec(vec![
             Vector2::new(1.0, 2.0),
             Vector2::new(3.0, 4.0),
             Vector2::new(5.0, 6.0),
@@ -23,7 +24,7 @@ godot_test!(
                 Vector2::new(3.0, 4.0),
                 Vector2::new(5.0, 6.0),
             ], read.as_slice());
-            read.clone()
+            read
         };
 
         let mut cow_arr = arr.new_ref();
@@ -51,12 +52,12 @@ godot_test!(
 
 godot_test!(
     test_vector2_array_debug {
-        let arr = Vector2Array::from_vec(vec![
+        let arr = PoolArray::from_vec(vec![
             Vector2::new(1.0, 2.0),
             Vector2::new(3.0, 4.0),
             Vector2::new(5.0, 6.0),
         ]);
 
-        assert_eq!(format!("{:?}", arr), format!("{:?}", &[Vector2::new(1.0, 2.0), Vector2::new(3.0, 4.0), Vector2::new(5.0, 6.0)]));
+        assert_eq!(format!("{arr:?}"), format!("{:?}", &[Vector2::new(1.0, 2.0), Vector2::new(3.0, 4.0), Vector2::new(5.0, 6.0)]));
     }
 );

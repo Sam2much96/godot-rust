@@ -38,14 +38,17 @@ macro_rules! godot_nativescript_init {
             // Compatibility warning if using in-house Godot version (not applicable for custom ones)
             #[cfg(not(feature = "custom-godot"))]
             {
+                use $crate::core_types::Variant;
+
                 let engine = gdnative::api::Engine::godot_singleton();
                 let info = engine.get_version_info();
 
                 if info.get("major").expect("major version") != Variant::new(3)
-                || info.get("minor").expect("minor version") != Variant::new(4) {
+                || info.get("minor").expect("minor version") != Variant::new(5)
+                || info.get("patch").expect("patch version") < Variant::new(1) {
                     let string = info.get("string").expect("version str").to::<String>().expect("version str type");
-                    gdnative::log::godot_warn!(
-                        "This godot-rust version is only compatible with Godot 3.4.x; detected version {}.\n\
+                    $crate::log::godot_warn!(
+                        "This godot-rust version is only compatible with Godot >= 3.5.1 and < 3.6; detected version {}.\n\
                         GDNative mismatches may lead to subtle bugs, undefined behavior or crashes at runtime.\n\
                 	    Apply the 'custom-godot' feature if you want to use current godot-rust with another Godot engine version.",
                         string
@@ -53,13 +56,12 @@ macro_rules! godot_nativescript_init {
                 }
             }
 
-            let __result = ::std::panic::catch_unwind(|| {
-                $callback($crate::init::InitHandle::new(handle));
-            });
+            $crate::private::report_panics("nativescript_init", || {
+                $crate::init::auto_register($crate::init::InitHandle::new(handle, $crate::init::InitLevel::AUTO));
+                $callback($crate::init::InitHandle::new(handle, $crate::init::InitLevel::USER));
 
-            if __result.is_err() {
-                $crate::godot_error!("gdnative-core: nativescript_init callback panicked");
-            }
+                $crate::init::diagnostics::missing_suggested_diagnostics();
+            });
         }
     };
 }
@@ -101,13 +103,10 @@ macro_rules! godot_gdnative_init {
                 return;
             }
 
-            let __result = ::std::panic::catch_unwind(|| {
-                let callback_options = $crate::init::InitializeInfo::new(options);
-                $callback(&callback_options)
+            $crate::private::report_panics("gdnative_init", || {
+                let init_info = $crate::init::InitializeInfo::new(options);
+                $callback(&init_info)
             });
-            if __result.is_err() {
-                $crate::godot_error!("gdnative-core: gdnative_init callback panicked");
-            }
         }
     };
 }
@@ -149,13 +148,10 @@ macro_rules! godot_gdnative_terminate {
                 return;
             }
 
-            let __result = ::std::panic::catch_unwind(|| {
+            $crate::private::report_panics("gdnative_terminate", || {
                 let term_info = $crate::init::TerminateInfo::new(options);
                 $callback(&term_info)
             });
-            if __result.is_err() {
-                $crate::godot_error!("gdnative-core: nativescript_init callback panicked");
-            }
 
             $crate::private::cleanup_internal_state();
         }

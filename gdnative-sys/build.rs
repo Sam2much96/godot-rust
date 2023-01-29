@@ -2,7 +2,7 @@ use std::env;
 
 fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let api_json_file = format!("{}/godot_headers/gdnative_api.json", manifest_dir);
+    let api_json_file = format!("{manifest_dir}/godot_headers/gdnative_api.json");
     let out_dir = env::var("OUT_DIR").unwrap();
 
     header_binding::generate(&manifest_dir, &out_dir);
@@ -11,7 +11,7 @@ fn main() {
 
     // Only re-run build.rs if the gdnative_api.json file has been updated.
     // Manually rebuilding the crate will ignore this.
-    println!("cargo:rerun-if-changed={}", api_json_file);
+    println!("cargo:rerun-if-changed={api_json_file}");
 }
 
 mod header_binding {
@@ -41,7 +41,7 @@ mod header_binding {
             .trim_end();
 
         let suffix = "usr/include";
-        let directory = format!("{}/{}", prefix, suffix);
+        let directory = format!("{prefix}/{suffix}");
 
         Ok(directory)
     }
@@ -62,6 +62,7 @@ mod header_binding {
         // to double-check them wherever they occur.
 
         assert!(
+            cfg!(target_os = "macos") || // All macOS architectures are supported
             cfg!(target_arch = "x86_64"),
             "unsupported host architecture: build from x86_64 instead"
         );
@@ -73,7 +74,6 @@ mod header_binding {
             // New NDK
             let available_ndk_versions: Vec<_> = std::fs::read_dir(android_ndk_folder.clone())
                 .unwrap()
-                .into_iter()
                 .map(|dir| dir.unwrap().path())
                 .collect();
 
@@ -92,18 +92,14 @@ mod header_binding {
                         android_ndk_root = Some(Path::join(&android_ndk_folder, ndk_version))
                     } else {
                         panic!(
-                            "no available android ndk versions matches {}. Available versions: {:?}",
-                            ndk_version, available_ndk_versions
+                            "no available android ndk versions matches {ndk_version}. Available versions: {available_ndk_versions:?}"
                         )
                     }
                 } else {
                     // No NDK version chosen, chose the most recent one and issue a warning
                     println!("cargo:warning=Multiple android ndk versions have been detected.");
                     println!("cargo:warning=You should chose one using ANDROID_NDK_VERSION environment variable to have reproducible builds.");
-                    println!(
-                        "cargo:warning=Available versions: {:?}",
-                        available_ndk_versions
-                    );
+                    println!("cargo:warning=Available versions: {available_ndk_versions:?}");
 
                     let ndk_version = available_ndk_versions
                         .iter()
@@ -112,10 +108,7 @@ mod header_binding {
                         .max()
                         .unwrap();
 
-                    println!(
-                        "cargo:warning=Automatically chosen version: {} (latest)",
-                        ndk_version
-                    );
+                    println!("cargo:warning=Automatically chosen version: {ndk_version} (latest)");
 
                     android_ndk_root =
                         Some(Path::join(&android_ndk_folder, ndk_version.to_string()));
@@ -195,7 +188,7 @@ mod header_binding {
             .ignore_functions()
             .size_t_is_usize(true)
             .ctypes_prefix("libc")
-            .clang_arg(format!("-I{}/godot_headers", manifest_dir));
+            .clang_arg(format!("-I{manifest_dir}/godot_headers"));
 
         let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
         let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap();
@@ -233,13 +226,13 @@ mod header_binding {
                 "x86_64" => "_M_X64",
                 "arm" => "_M_ARM",
                 "aarch64" => "_M_ARM64",
-                _ => panic!("architecture {} not supported on Windows", target_arch),
+                _ => panic!("architecture {target_arch} not supported on Windows"),
             };
 
             builder = builder
                 .clang_arg("-fms-extensions")
                 .clang_arg("-fmsc-version=1300")
-                .clang_arg(format!("-D{}=100", arch_macro));
+                .clang_arg(format!("-D{arch_macro}=100"));
         }
 
         if target_os == "android" {
@@ -456,7 +449,7 @@ mod api_wrapper {
             ("VIDEODECODER", 0, 1) => format_ident!("godot_gdnative_ext_videodecoder_api_struct"),
             ("NET", 3, 1) => format_ident!("godot_gdnative_ext_net_api_struct"),
             ("NET", maj, min) => format_ident!("godot_gdnative_ext_net_{}_{}_api_struct", maj, min),
-            api => panic!("Unknown API type and version: {:?}", api),
+            api => panic!("Unknown API type and version: {api:?}"),
         }
     }
 
@@ -469,7 +462,7 @@ mod api_wrapper {
             "ARVR" => format_ident!("GDNATIVE_API_TYPES_GDNATIVE_EXT_ARVR"),
             "VIDEODECODER" => format_ident!("GDNATIVE_API_TYPES_GDNATIVE_EXT_VIDEODECODER"),
             "NET" => format_ident!("GDNATIVE_API_TYPES_GDNATIVE_EXT_NET"),
-            other => panic!("Unknown API type: {:?}", other),
+            other => panic!("Unknown API type: {other:?}"),
         }
     }
 
@@ -481,10 +474,10 @@ mod api_wrapper {
         let from_json = from_json.as_ref();
         let to = to.as_ref();
         let api_json_file = std::fs::read_to_string(from_json)
-            .unwrap_or_else(|_| panic!("No such file: {:?}", from_json));
+            .unwrap_or_else(|_| panic!("No such file: {from_json:?}"));
         eprintln!("{}", &api_json_file);
         let api_root: ApiRoot = miniserde::json::from_str(&api_json_file)
-            .unwrap_or_else(|_| panic!("Could not parse ({:?}) into ApiRoot", from_json));
+            .unwrap_or_else(|_| panic!("Could not parse ({from_json:?}) into ApiRoot"));
 
         // Note: this code ensured that Godot 4 (which was back then GDNative 1.3) wasn't actually used.
         // Godot uses now GDExtension, so this no longer applies. In fact, different module APIs all have different versions.
@@ -514,7 +507,7 @@ mod api_wrapper {
         };
         let mut wrapper_file = File::create(to.join(file_name))
             .unwrap_or_else(|_| panic!("Couldn't create output file: {:?}", to.join(file_name)));
-        write!(wrapper_file, "{}", wrapper).unwrap();
+        write!(wrapper_file, "{wrapper}").unwrap();
     }
 
     fn godot_api_functions(api: &ApiRoot) -> TokenStream {
@@ -593,7 +586,7 @@ mod api_wrapper {
             (1, true) => quote!(*const ),
             (1, false) => quote!(*mut ),
             (2, true) => quote!(*mut *const ),
-            _ => panic!("Unknown C type (Too many pointers?): {:?}", c_type),
+            _ => panic!("Unknown C type (Too many pointers?): {c_type:?}"),
         };
         let rust_type = match base_c_type {
             "void" => {

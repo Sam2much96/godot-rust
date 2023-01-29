@@ -5,16 +5,78 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.2] - 2023-01-09
 
-## [0.10.2] - unreleased
+This is a hot-fix release for a high priority issue.
+
+### Fixed
+
+- API methods that may return null object pointers should no longer panic. ([#1002](https://github.com/godot-rust/gdnative/pull/1002))
+
+## [0.11.1] - 2023-01-06
+
+This is a backwards-compatible release; thus no removals or breaking changes.
+
+### Added
+
+- `NativeClass` can now be derived for generic types. Additionally, `#[monomorphize]` can be used to name concrete monomorphizations. ([#983](https://github.com/godot-rust/gdnative/pull/983))
+- With the optional `inventory` feature enabled, `NativeClass`es and their `#[monomorphize]`d aliases can now be automatically registered on supported platforms. ([#999](https://github.com/godot-rust/gdnative/pull/999))
+- `#[methods]` now supports async-await coroutines. ([#975](https://github.com/godot-rust/gdnative/pull/975))
+- Mix-in impl blocks can now be created through `#[methods(mixin = "Name")]`. These blocks have a many-to-many relationship with `NativeClass`es, and can be generic, or trait implementations. ([#999](https://github.com/godot-rust/gdnative/pull/999))
+- Added a Third-Person-Shooter example. ([#977](https://github.com/godot-rust/gdnative/pull/977))
+- Variant derive macros now support stringly and numeric representations for fieldless enums. ([#964](https://github.com/godot-rust/gdnative/pull/964))
+- `FromVariant` can now be derived for uninhabitable enums. ([#962](https://github.com/godot-rust/gdnative/pull/962))
+- Dedicated accessor methods are now generated for indexed properties, such as `SpatialMaterial::albedo_texture`. ([#970](https://github.com/godot-rust/gdnative/pull/970))
+- Implemented additional geometric operations on `Transform3D`. ([#898](https://github.com/godot-rust/gdnative/pull/898))
+- Android targets are now supported on macOS running on Apple Silicon.  ([#982](https://github.com/godot-rust/gdnative/pull/982))
+
+### Changed
+
+- Improved panic messages in init/terminate callbacks. ([#960](https://github.com/godot-rust/gdnative/pull/960))
+- `ptrcall`s are now opt-in, with the `ptrcall` feature flag. This improves binary compatibility in the default configuration. ([#973](https://github.com/godot-rust/gdnative/pull/973))
+
+### Fixed
+
+- Variant derive macros now work properly with generic types with bounds. ([#961](https://github.com/godot-rust/gdnative/pull/961))
+- `Transform::interpolate_with` now has behavior consistent with Godot 3 (spherical interpolation). ([#998](https://github.com/godot-rust/gdnative/pull/998))
+- The correct number of arguments are now reported when an invalid argument list is provided for a method with optional arguments. ([#1000](https://github.com/godot-rust/gdnative/pull/1000))
+
+## [0.11.0] - 2022-10-02
+
+### Changed
+
+- Changed supported Godot version to 3.5.1 ([#910](https://github.com/godot-rust/godot-rust/pull/910))
+- MSRV is now 1.63 ([#910](https://github.com/godot-rust/godot-rust/pull/910))
+- Prefixed `NativeClass` methods for manual implementors ([#955](https://github.com/godot-rust/godot-rust/pull/955))
+
+### Fixed
+
+- `godot_init` may not find some symbols ([#954](https://github.com/godot-rust/godot-rust/pull/954))
+
+### Removed
+
+- `Transform2D::from_rotation_translation_scale()` constructor ([#910](https://github.com/godot-rust/godot-rust/pull/910))
+- `RefInstance` and `TypedArray` type aliases ([#955](https://github.com/godot-rust/godot-rust/pull/955))
+
+
+## [0.10.2] - 2022-10-02
 
 Last maintenance release for Godot 3.4.
 
-# Added
+### Added
 
-- `globalscope::load` method ([#940](https://github.com/godot-rust/godot-rust/pull/940), [#941](https://github.com/godot-rust/godot-rust/pull/941))
+- `globalscope::load()` function ([#940](https://github.com/godot-rust/godot-rust/pull/940), [#941](https://github.com/godot-rust/godot-rust/pull/941))
 - `Color` constructors from HTML string and integers ([#939](https://github.com/godot-rust/godot-rust/pull/939))
 - Version check to warn if Godot is not 3.4 ([#942](https://github.com/godot-rust/godot-rust/pull/942))
+- Support for iOS simulator on Mac M1 ([#944](https://github.com/godot-rust/godot-rust/pull/944))
+
+### Fixed
+
+- During tests, `get_api()` no longer aborts  ([#929](https://github.com/godot-rust/godot-rust/pull/929))
+- Confusing `Transform2D` constructor ([#930](https://github.com/godot-rust/godot-rust/pull/930))
+- Bug in `Rect2::intersects()` ([#948](https://github.com/godot-rust/godot-rust/pull/948))
+- Bug in `Vector2::rotated()` ([#952](https://github.com/godot-rust/godot-rust/pull/952))
+
 
 ## [0.10.1] - 2022-09-03
 

@@ -1,4 +1,9 @@
 //! Property registration.
+
+// For the `PropertyUsage` bitflags declaration. The attribute doesn't work above the macro
+// invocation.
+#![allow(clippy::unnecessary_cast)]
+
 use std::marker::PhantomData;
 
 use accessor::{Getter, RawGetter, RawSetter, Setter};
@@ -9,6 +14,8 @@ use crate::export::{ClassBuilder, NativeClass};
 use crate::object::ownership::Shared;
 use crate::object::{GodotObject, Instance, Ref};
 use crate::private::get_api;
+
+use super::RpcMode;
 
 mod accessor;
 mod invalid_accessor;
@@ -73,6 +80,7 @@ pub struct PropertyBuilder<'a, C, T: Export, S = InvalidSetter<'a>, G = InvalidG
     default: Option<T>,
     hint: Option<T::Hint>,
     usage: PropertyUsage,
+    rpc_mode: RpcMode,
     class_builder: &'a ClassBuilder<C>,
 }
 
@@ -91,6 +99,7 @@ where
             default: None,
             hint: None,
             usage: PropertyUsage::DEFAULT,
+            rpc_mode: RpcMode::Disabled,
             class_builder,
         }
     }
@@ -114,7 +123,7 @@ where
         let default = self.default.to_variant();
 
         let mut attr = sys::godot_property_attributes {
-            rset_type: sys::godot_method_rpc_mode_GODOT_METHOD_RPC_MODE_DISABLED, // TODO:
+            rset_type: self.rpc_mode.sys(),
             type_: variant_type as sys::godot_int,
             hint: hint_kind,
             hint_string: hint_string.to_sys(),
@@ -156,6 +165,7 @@ where
             default: self.default,
             hint: self.hint,
             usage: self.usage,
+            rpc_mode: self.rpc_mode,
             class_builder: self.class_builder,
         }
     }
@@ -179,6 +189,7 @@ where
             default: self.default,
             hint: self.hint,
             usage: self.usage,
+            rpc_mode: self.rpc_mode,
             class_builder: self.class_builder,
         }
     }
@@ -200,6 +211,7 @@ where
             default: self.default,
             hint: self.hint,
             usage: self.usage,
+            rpc_mode: self.rpc_mode,
             class_builder: self.class_builder,
         }
     }
@@ -221,6 +233,7 @@ where
             default: self.default,
             hint: self.hint,
             usage: self.usage,
+            rpc_mode: self.rpc_mode,
             class_builder: self.class_builder,
         }
     }
@@ -242,6 +255,7 @@ where
             default: self.default,
             hint: self.hint,
             usage: self.usage,
+            rpc_mode: self.rpc_mode,
             class_builder: self.class_builder,
         }
     }
@@ -263,6 +277,7 @@ where
             default: self.default,
             hint: self.hint,
             usage: self.usage,
+            rpc_mode: self.rpc_mode,
             class_builder: self.class_builder,
         }
     }
@@ -286,6 +301,13 @@ where
     #[inline]
     pub fn with_usage(mut self, usage: PropertyUsage) -> Self {
         self.usage = usage;
+        self
+    }
+
+    /// Sets a RPC mode.
+    #[inline]
+    pub fn with_rpc_mode(mut self, rpc_mode: RpcMode) -> Self {
+        self.rpc_mode = rpc_mode;
         self
     }
 }
@@ -532,13 +554,13 @@ mod impl_export {
     impl_export_for_core_type_without_hint!(NodePath);
     impl_export_for_core_type_without_hint!(Rid);
     impl_export_for_core_type_without_hint!(Dictionary);
-    impl_export_for_core_type_without_hint!(ByteArray);
-    impl_export_for_core_type_without_hint!(Int32Array);
-    impl_export_for_core_type_without_hint!(Float32Array);
-    impl_export_for_core_type_without_hint!(StringArray);
-    impl_export_for_core_type_without_hint!(Vector2Array);
-    impl_export_for_core_type_without_hint!(Vector3Array);
-    impl_export_for_core_type_without_hint!(ColorArray);
+    impl_export_for_core_type_without_hint!(PoolArray<u8>: ByteArray);
+    impl_export_for_core_type_without_hint!(PoolArray<i32>: Int32Array);
+    impl_export_for_core_type_without_hint!(PoolArray<f32>: Float32Array);
+    impl_export_for_core_type_without_hint!(PoolArray<GodotString>: StringArray);
+    impl_export_for_core_type_without_hint!(PoolArray<Vector2>: Vector2Array);
+    impl_export_for_core_type_without_hint!(PoolArray<Vector3>: Vector3Array);
+    impl_export_for_core_type_without_hint!(PoolArray<Color>: ColorArray);
 
     impl Export for Color {
         type Hint = hint::ColorHint;
